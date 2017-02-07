@@ -1,2 +1,3 @@
 #.gitgnore file
 src/github.com/*
+.idea/**

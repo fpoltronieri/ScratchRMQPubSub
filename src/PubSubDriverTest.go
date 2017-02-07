@@ -73,8 +73,7 @@ type messageStat struct {
 
 func main() {
 	//Command-line arguments
-	nodeMode := flag.String("mode", "", "pub for publisher mode," +
-		"sub for subscriber mode")
+	nodeMode := flag.String("mode", "", "pub for publisher mode sub for subscriber mode")
 	brokerAddress := flag.String("broker-address", DefaultBrokerAddress, "The address of the RabbitMQ broker")
 	timeSendInterval := flag.Duration("time-send-interval", DefaultTimeSendInterval, "The interval time for the publisher")
 	messageSize := flag.Int("message-size", DefaultMessageSize, "Message size")
@@ -108,7 +107,6 @@ func main() {
 	imsgSentCount := 0
 	imsgRcvCount := 0
 	if *nodeMode == PublisherMode {
-		//create a 1024 random byte message
 		for true {
 			message, err := createMessageWithMetadata(1, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
 			if err != nil {
