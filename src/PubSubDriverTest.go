@@ -10,6 +10,7 @@ import (
 	"time"
 	"encoding/binary"
 	"bytes"
+	"sync"
 
 	"github.com/streadway/amqp"
 	"errors"
@@ -20,6 +21,7 @@ const (
 	QueueName string = "BlueForceQueue"
 	PublisherMode string = "pub"
 	SubscriberMode string = "sub"
+	PubSubMode string = "pubsub"
 	DefaultBrokerAddress string = "localhost"
 	BrokerPort int = 5672
 	DefaultTimeSendInterval time.Duration = 1000
@@ -47,7 +49,6 @@ func parseMetaDataFromMsg(msg []byte) (MsgMetaData) {
 		msgId: binary.BigEndian.Uint32(msg[4:8]),
 		timestamp: int64(binary.BigEndian.Uint64(msg[8:16])),
 	}
-	log.Printf("parsed metadata", msgMetaData)
 	return msgMetaData
 }
 
@@ -64,7 +65,7 @@ func createMessageWithMetadata(clientId uint32, msgId uint32, timestamp int64, m
 	msgData := make([]byte, msgLen - len(metaData))
 	io.ReadFull(rand.Reader, msgData)
 	msg := append(metaData, msgData...)
-	log.Printf("Msg ", metaData)
+	//log.Printf("Msg ", metaData)
 	return msg, nil
 }
 
@@ -75,14 +76,101 @@ type MsgStat struct {
 	cumulativeDelay int64
 }
 
+//publisher routine
+func publisher(ch *amqp.Channel, group sync.WaitGroup) {
+	defer group.Done()
+	imsgSentCount := 0
+	for true {
+		message, err := createMessageWithMetadata(1, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
+		if err != nil {
+			log.Printf("Impossible to create the message")
+			os.Exit(-1)
+		}
+		err = ch.Publish(
+			GroupName, // exchange
+			"",          // routing key
+			false,       // mandatory
+			false,       // immediate
+			amqp.Publishing{
+				Body:        message,
+			})
+		failOnError(err, "Failed to publish a message")
+		if err == nil {
+			imsgSentCount++
+		}
+		log.Printf("Sent message: msgSize %d sent messages %d metadata", len(message), imsgSentCount,
+			parseMetaDataFromMsg(message))
+		time.Sleep((*timeSendInterval) *  time.Millisecond)
+	}
+}
+
+//subscriber routine
+func subscriber(ch *amqp.Channel, group sync.WaitGroup) {
+	//declare a non durable queue to receive all the messages
+	//for the groupName
+	defer group.Done()
+	imsgRcvCount := 0
+	q, err := ch.QueueDeclare(
+		"",    // name
+		true,  // durable
+		false, // delete when usused
+		true,  // exclusive
+		false, // no-wait
+		nil,   // arguments
+	)
+
+	failOnError(err, "Failed to declare a queue")
+	err = ch.QueueBind(
+		q.Name,    // queue name
+		"",        // routing key
+		GroupName, // exchange
+		false,
+		nil)
+	failOnError(err, "Failed to bind a queue")
+
+	msgs, err := ch.Consume(
+		q.Name, // queue
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	failOnError(err, "Failed to register a consumer")
+
+	//create the map to store the messages
+	statmap := make(map[uint32]MsgStat)
+	forever := make(chan bool)
+	go func() {
+		for m := range msgs {
+			imsgRcvCount++
+			//delay for the message in millisecond
+			metaData := parseMetaDataFromMsg(m.Body)
+			delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
+			statmap[metaData.clientId] = MsgStat{
+				receivedMsg:     int32(statmap[metaData.clientId].receivedMsg + 1),
+				cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
+			}
+			log.Printf(" Received message: msgSize %d MsgId %s Total Received messages %d. ReceivedDelay(ms) %d", len(m.Body),
+				metaData.msgId, imsgRcvCount, delay)
+		}
+	}()
+	<-forever
+}
+
+
+var nodeMode = flag.String("mode", "", "pub for publisher mode sub for subscriber mode and pubsub to launch both")
+var brokerAddress = flag.String("broker-address", DefaultBrokerAddress, "The address of the RabbitMQ broker")
+var timeSendInterval = flag.Duration("time-send-interval", DefaultTimeSendInterval, "The interval time for the publisher")
+var messageSize = flag.Int("message-size", DefaultMessageSize, "Message size")
+
 func main() {
 	//Command-line arguments
-	nodeMode := flag.String("mode", "", "pub for publisher mode sub for subscriber mode")
-	brokerAddress := flag.String("broker-address", DefaultBrokerAddress, "The address of the RabbitMQ broker")
-	timeSendInterval := flag.Duration("time-send-interval", DefaultTimeSendInterval, "The interval time for the publisher")
-	messageSize := flag.Int("message-size", DefaultMessageSize, "Message size")
 	flag.Parse()
-	if *nodeMode != PublisherMode && *nodeMode != SubscriberMode {
+	var waitgroup sync.WaitGroup
+	waitgroup.Add(1)
+	if *nodeMode != PublisherMode && *nodeMode != SubscriberMode && *nodeMode != PubSubMode {
 		fmt.Println("Error! bad parameter, exiting")
 		flag.Usage()
 		os.Exit(-1)
@@ -107,84 +195,23 @@ func main() {
 	)
 	failOnError(err, "Failed to declare an exchange")
 
-	//declare the message count
-	imsgSentCount := 0
-	imsgRcvCount := 0
 	if *nodeMode == PublisherMode {
-		for true {
-			message, err := createMessageWithMetadata(1, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
-			if err != nil {
-				log.Printf("Impossible to create the message")
-				os.Exit(-1)
-			}
-			err = ch.Publish(
-				GroupName, // exchange
-				"",          // routing key
-				false,       // mandatory
-				false,       // immediate
-				amqp.Publishing{
-					Body:        message,
-				})
-			failOnError(err, "Failed to publish a message")
-			if err == nil {
-				imsgSentCount++
-			}
-			log.Printf("Sent message: msgSize %d sent messages %d metadata", len(message), imsgSentCount,
-			parseMetaDataFromMsg(message))
-			time.Sleep((*timeSendInterval) *  time.Millisecond)
-		}
+		//launche the publisher goroutines
+		go publisher(ch, waitgroup)
 	} else if *nodeMode == SubscriberMode {
-		//declare a non durable queue to receive all the messages
-		//for the groupName
-		q, err := ch.QueueDeclare(
-			"",    // name
-			true, // durable
-			false, // delete when usused
-			true,  // exclusive
-			false, // no-wait
-			nil,   // arguments
-		)
+		//launch the subscriber go routine
+		go subscriber(ch, waitgroup)
+	} else if  *nodeMode == PubSubMode {
+		//start both routines
+		//add another routine to the waitGroup
+		waitgroup.Add(1)
+		go publisher (ch, waitgroup)
+		go subscriber (ch, waitgroup)
 
-		failOnError(err, "Failed to declare a queue")
-		err = ch.QueueBind(
-			q.Name, // queue name
-			"",     // routing key
-			GroupName, // exchange
-			false,
-			nil)
-		failOnError(err, "Failed to bind a queue")
-
-		msgs, err := ch.Consume(
-			q.Name, // queue
-			"",     // consumer
-			true,   // auto-ack
-			false,  // exclusive
-			false,  // no-local
-			false,  // no-wait
-			nil,    // args
-		)
-		failOnError(err, "Failed to register a consumer")
-
-		//create the map to store the messages
-		statmap := make(map[uint32]MsgStat)
-		forever := make(chan bool)
-		go func() {
-			for m := range msgs {
-				imsgRcvCount++
-				//delay for the message in millisecond
-				metaData := parseMetaDataFromMsg(m.Body)
-				delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
-				statmap[metaData.clientId] = MsgStat{
-							receivedMsg: int32(statmap[metaData.clientId].receivedMsg + 1),
-							cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
-				}
-				log.Printf(" Received message: msgSize %d MsgId %s Total Received messages %d. ReceivedDelay(ms) %d", len(m.Body),
-					metaData.msgId, imsgRcvCount, delay)
-			}
-		}()
-		<-forever
 	} else {
 		fmt.Println("Error! bad parameter, exiting")
 		os.Exit(-1)
 	}
+	waitgroup.Wait()
+	log.Printf("Exiting")
 }
