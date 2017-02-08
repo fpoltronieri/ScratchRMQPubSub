@@ -43,6 +43,14 @@ type MsgMetaData struct {
 	msgId uint32
 	timestamp int64
 }
+
+//MsgStat
+//stat for messages
+type MsgStat struct {
+	receivedMsg int32
+	cumulativeDelay int64
+}
+
 //the function parses the metadata from a []byte message and returns
 //a MsgMetaData struct
 func parseMetaDataFromMsg(msg []byte) (MsgMetaData) {
@@ -68,13 +76,6 @@ func createMessageWithMetadata(clientId uint32, msgId uint32, timestamp int64, m
 	msg := append(metaData, msgData...)
 	//log.Printf("Msg ", metaData)
 	return msg, nil
-}
-
-//MsgStat
-//stat for messages
-type MsgStat struct {
-	receivedMsg int32
-	cumulativeDelay int64
 }
 
 //publisher routine
@@ -146,12 +147,12 @@ func subscriber(ch *amqp.Channel, group sync.WaitGroup) {
 		for m := range msgs {
 
 			metaData := parseMetaDataFromMsg(m.Body)
+			delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
 			//if the clientID of the received message
 			//is the same of the the local clientId do not increase the stat
 			if metaData.clientId != nodeClientID {
 				imsgRcvCount++
 				//delay for the message in millisecond
-				delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
 				statmap[metaData.clientId] = MsgStat{
 					receivedMsg:     int32(statmap[metaData.clientId].receivedMsg + 1),
 					cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
@@ -172,9 +173,9 @@ var messageSize = flag.Int("message-size", DefaultMessageSize, "Message size")
 //create a unique clientID
 var nodeClientID uint32 = rand2.Uint32() + uint32(time.Now().Nanosecond())
 func main() {
-	log.Printf("Started in %s mode with %d clientId", *nodeMode, nodeClientID)
-	//Command-line arguments
 	flag.Parse()
+	log.Printf("Started in %s mode with clientId %d", *nodeMode, nodeClientID)
+	//Command-line arguments
 	var waitgroup sync.WaitGroup
 	waitgroup.Add(1)
 	if *nodeMode != PublisherMode && *nodeMode != SubscriberMode && *nodeMode != PubSubMode {
