@@ -14,6 +14,7 @@ import (
 
 	"github.com/streadway/amqp"
 	"errors"
+	rand2 "math/rand"
 )
 
 const (
@@ -81,7 +82,7 @@ func publisher(ch *amqp.Channel, group sync.WaitGroup) {
 	defer group.Done()
 	imsgSentCount := 0
 	for true {
-		message, err := createMessageWithMetadata(1, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
+		message, err := createMessageWithMetadata(nodeClientID, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
 		if err != nil {
 			log.Printf("Impossible to create the message")
 			os.Exit(-1)
@@ -141,22 +142,25 @@ func subscriber(ch *amqp.Channel, group sync.WaitGroup) {
 
 	//create the map to store the messages
 	statmap := make(map[uint32]MsgStat)
-	forever := make(chan bool)
 	go func() {
 		for m := range msgs {
-			imsgRcvCount++
-			//delay for the message in millisecond
+
 			metaData := parseMetaDataFromMsg(m.Body)
-			delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
-			statmap[metaData.clientId] = MsgStat{
-				receivedMsg:     int32(statmap[metaData.clientId].receivedMsg + 1),
-				cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
+			//if the clientID of the received message
+			//is the same of the the local clientId do not increase the stat
+			if metaData.clientId != nodeClientID {
+				imsgRcvCount++
+				//delay for the message in millisecond
+				delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
+				statmap[metaData.clientId] = MsgStat{
+					receivedMsg:     int32(statmap[metaData.clientId].receivedMsg + 1),
+					cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
+				}
+				log.Printf(" Received message: clientId %d msgSize %d MsgId %d Total Received messages %d. ReceivedDelay(ms) %d",
+					metaData.clientId, len(m.Body), metaData.msgId, imsgRcvCount, delay)
 			}
-			log.Printf(" Received message: msgSize %d MsgId %s Total Received messages %d. ReceivedDelay(ms) %d", len(m.Body),
-				metaData.msgId, imsgRcvCount, delay)
 		}
 	}()
-	<-forever
 }
 
 
@@ -165,7 +169,10 @@ var brokerAddress = flag.String("broker-address", DefaultBrokerAddress, "The add
 var timeSendInterval = flag.Duration("time-send-interval", DefaultTimeSendInterval, "The interval time for the publisher")
 var messageSize = flag.Int("message-size", DefaultMessageSize, "Message size")
 
+//create a unique clientID
+var nodeClientID uint32 = rand2.Uint32() + uint32(time.Now().Nanosecond())
 func main() {
+	log.Printf("Started in %s mode with %d clientId", *nodeMode, nodeClientID)
 	//Command-line arguments
 	flag.Parse()
 	var waitgroup sync.WaitGroup
