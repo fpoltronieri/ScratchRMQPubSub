@@ -33,6 +33,8 @@ func failOnError(err error, msg string) {
 	}
 }
 
+//MsgMetaData struct
+//Represent the metadata of a message
 type MsgMetaData struct {
 	clientId uint32
 	msgId uint32
@@ -66,7 +68,9 @@ func createMessageWithMetadata(clientId uint32, msgId uint32, timestamp int64, m
 	return msg, nil
 }
 
-type messageStat struct {
+//MsgStat
+//stat for messages
+type MsgStat struct {
 	receivedMsg int32
 	cumulativeDelay int64
 }
@@ -162,7 +166,7 @@ func main() {
 		failOnError(err, "Failed to register a consumer")
 
 		//create the map to store the messages
-		statmap := make(map[uint32]messageStat)
+		statmap := make(map[uint32]MsgStat)
 		forever := make(chan bool)
 		go func() {
 			for m := range msgs {
@@ -170,11 +174,11 @@ func main() {
 				//delay for the message in millisecond
 				metaData := parseMetaDataFromMsg(m.Body)
 				delay := (time.Now().UnixNano() - metaData.timestamp) / 1e6
-				statmap[metaData.clientId] = messageStat{
+				statmap[metaData.clientId] = MsgStat{
 							receivedMsg: int32(statmap[metaData.clientId].receivedMsg + 1),
 							cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
 				}
-				log.Printf(" Received message: msgSize %d MsgId %s Total Received messages %d. Delay(ms) %d", len(m.Body),
+				log.Printf(" Received message: msgSize %d MsgId %s Total Received messages %d. ReceivedDelay(ms) %d", len(m.Body),
 					metaData.msgId, imsgRcvCount, delay)
 			}
 		}()
