@@ -1,3 +1,4 @@
 #.gitgnore file
 src/github.com/*
 .idea/**
+src/*.exe*
