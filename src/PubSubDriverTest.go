@@ -158,10 +158,24 @@ func subscriber(ch *amqp.Channel, group sync.WaitGroup) {
 					receivedMsg:     int32(statmap[metaData.clientId].receivedMsg + 1),
 					cumulativeDelay: int64(statmap[metaData.clientId].cumulativeDelay + delay),
 				}
-				log.Printf(" Received message: clientId %d msgSize %d MsgId %d Total Received messages %d. ReceivedDelay(ms) %d",
+				log.Printf(" Received message: clientId %d msgSize %d MsgId %d Total Received " +
+					"messages %d. ReceivedDelay(ms) %d",
 					metaData.clientId, len(m.Body), metaData.msgId, imsgRcvCount, delay)
 			}
 		}
+	}()
+	//goroutine to print the stat data on the screen
+	go func() {
+		for  true {
+				fmt.Printf("\n\n\n\n\t\tSTAT SUMMARY\n\n")
+				for clientId, clientStat := range statmap {
+					fmt.Printf("ClientId: %d ReceveidMsg: %d CumulativeDela: %d ms\n", clientId,
+						clientStat.receivedMsg, clientStat.cumulativeDelay)
+				}
+				fmt.Printf("\n\n\n\n")
+				time.Sleep(2000 * time.Millisecond)
+		}
+
 	}()
 }
 
