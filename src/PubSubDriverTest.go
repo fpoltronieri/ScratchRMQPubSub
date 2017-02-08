@@ -27,6 +27,7 @@ const (
 	BrokerPort int = 5672
 	DefaultTimeSendInterval time.Duration = 1000
 	DefaultMessageSize int = 1024
+	DefaultMessageToSend int = 1024
 	MetaDataSize int = 12
 )
 
@@ -82,7 +83,7 @@ func createMessageWithMetadata(clientId uint32, msgId uint32, timestamp int64, m
 func publisher(ch *amqp.Channel, group sync.WaitGroup) {
 	defer group.Done()
 	imsgSentCount := 0
-	for true {
+	for i := 0; i < *messageToSend; i++ {
 		message, err := createMessageWithMetadata(nodeClientID, uint32(imsgSentCount), time.Now().UnixNano(), *messageSize)
 		if err != nil {
 			log.Printf("Impossible to create the message")
@@ -169,7 +170,7 @@ var nodeMode = flag.String("mode", "", "pub for publisher mode sub for subscribe
 var brokerAddress = flag.String("broker-address", DefaultBrokerAddress, "The address of the RabbitMQ broker")
 var timeSendInterval = flag.Duration("time-send-interval", DefaultTimeSendInterval, "The interval time for the publisher")
 var messageSize = flag.Int("message-size", DefaultMessageSize, "Message size")
-
+var messageToSend = flag.Int("massage-to-send", DefaultMessageToSend, "Number of messages to send")
 //create a unique clientID
 var nodeClientID uint32 = rand2.Uint32() + uint32(time.Now().Nanosecond())
 func main() {
