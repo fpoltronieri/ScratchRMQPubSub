@@ -167,13 +167,15 @@ func subscriber(ch *amqp.Channel, group sync.WaitGroup) {
 	//goroutine to print the stat data on the screen
 	go func() {
 		for  true {
+			if len(statmap) != 0 {
 				fmt.Printf("\n\n\n\n\t\tSTAT SUMMARY\n\n")
 				for clientId, clientStat := range statmap {
-					fmt.Printf("ClientId: %d ReceveidMsg: %d CumulativeDela: %d ms\n", clientId,
+					fmt.Printf("ClientId: %d ReceveidMsg: %d CumulativeDelay: %d ms\n", clientId,
 						clientStat.receivedMsg, clientStat.cumulativeDelay)
 				}
 				fmt.Printf("\n\n\n\n")
 				time.Sleep(2000 * time.Millisecond)
+			}
 		}
 
 	}()
